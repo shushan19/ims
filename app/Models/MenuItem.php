@@ -46,7 +46,7 @@ class MenuItem extends Model
     {
         $shortfalls = [];
 
-        foreach ($this->ingredients() as $ingredient) {
+        foreach ($this->ingredients as $ingredient) {
             $required = $ingredient->pivot->quantity_required * $quantity;
 
             if ($ingredient->current_stock < $required) {

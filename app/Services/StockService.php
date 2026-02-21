@@ -9,15 +9,13 @@ use Illuminate\Validation\ValidationException;
 
 class StockService
 {
-
     //checking if we have enough stock before placing order if anything is short is will thorw error and stop
     public function verifyStockForOrder(Order $order): void
     {
         // This will collect any ingredients we don't have enough of
         $shortfalls = [];
 
-        // Go through each item the customer ordered
-        // e.g. 2x Burgers, 1x Pizza
+        // Go through each item the customer ordered eg burger, pizza, etc.
         foreach ($order->orderItems as $orderItem) {
 
             // Load this menu item's ingredients from the recipe
@@ -26,47 +24,30 @@ class StockService
 
             // Now check each ingredient in the recipe
             foreach ($menuItem->ingredients as $ingredient) {
-
-                // How much of this ingredient do we need?
-                // Formula: (quantity per serving) × (how many ordered)
-                // Example: Burger needs 50g tomato, customer ordered 2
-                //          So we need: 50 × 2 = 100g tomato
+                //checking how much about is needed. eg. burger needs 50g tomato, customer ordered 2 = 50g tomato * 2
                 $amountNeeded = $ingredient->pivot->quantity_required * $orderItem->quantity;
 
-                // Do we actually have that much in stock?
+                //checking if the required amount of stock is available
                 if ($ingredient->current_stock < $amountNeeded) {
-
-                    // Not enough! Add to our shortfalls list
+                    // if the required amount of stock is not available then add to shortfalls
                     $shortfalls[] = "{$ingredient->name}: needs {$amountNeeded} {$ingredient->unit}, "
                         . "only {$ingredient->current_stock} available";
                 }
             }
         }
 
-        // If we found ANY shortfalls, throw an error
-        // This stops the order from being placed
+        //check where there are any shortfalls if yes then throw an exception error and stop the order
         if (!empty($shortfalls)) {
             throw ValidationException::withMessages([
                 'stock' => $shortfalls
             ]);
         }
-
-        // If we reach here, all stock is sufficient — order can proceed!
     }
 
-
-    // ========================================================
-    // STEP 2: DEDUCT stock when order is marked as "Delivered"
-    // ========================================================
-    // This runs only when an order status changes to "delivered".
-    // We loop through every item, find its recipe, and subtract
-    // the ingredients from the current stock.
-    // ========================================================
-
+    //function for stock deduction after the order is placed if there is no shortfalls
     public function deductStockForOrder(Order $order): void
     {
-        // Go through each item in the order
-        // e.g. 2x Burgers, 1x Pizza
+        // Go through each item the customer ordered eg burger, pizza, etc.
         foreach ($order->orderItems as $orderItem) {
 
             // Load this menu item with its recipe ingredients
@@ -75,22 +56,18 @@ class StockService
             // Go through each ingredient in the recipe
             foreach ($menuItem->ingredients as $ingredient) {
 
-                // Calculate how much to deduct
-                // Example: Burger needs 50g cheese, customer ordered 2
-                //          Deduct: 50 × 2 = 100g cheese
+                //calculation the amount of ingredients to deduct according to quantity order items
                 $amountToDeduct = $ingredient->pivot->quantity_required * $orderItem->quantity;
 
                 // Subtract from the ingredient's current stock in database
-                // decrement() is a Laravel helper that does:
-                // UPDATE ingredients SET current_stock = current_stock - $amountToDeduct
+                //decrement() is Laravel helper function used for subtraction
                 $ingredient->decrement('current_stock', $amountToDeduct);
 
-                // Write a log entry so we have a history of what was used
-                // This creates a row in the stock_movements table
+                //log for items used
                 StockMovement::create([
                     'ingredient_id'  => $ingredient->id,
                     'order_id'       => $order->id,
-                    'quantity'       => -$amountToDeduct, // negative = stock went OUT
+                    'quantity'       => -$amountToDeduct, //negative if out of stock
                     'type'           => 'deduction',
                     'notes'          => "Used for Order #{$order->id}",
                 ]);
@@ -98,43 +75,26 @@ class StockService
         }
     }
 
-
-    // ========================================================
-    // STEP 3: MANUALLY ADD stock (e.g. new delivery from supplier)
-    // ========================================================
-    // This is simple — someone received new stock and wants
-    // to update the system. We add to current stock and log it.
-    // ========================================================
-
+    //manually adding stock into the inventory
     public function addStock(Ingredient $ingredient, float $quantity, ?string $notes = null): void
     {
-        // Add the quantity to current stock in the database
-        // increment() does: UPDATE ingredients SET current_stock = current_stock + $quantity
+        // Add the quantity to current stock in the database. increment helper function that updates the ingredient set
         $ingredient->increment('current_stock', $quantity);
 
         // Log this addition in stock_movements
         StockMovement::create([
             'ingredient_id' => $ingredient->id,
-            'order_id'      => null,            // no order linked, this is manual
+            'order_id'      => null,
             'quantity'      => $quantity,        // positive = stock came IN
             'type'          => 'manual_add',
             'notes'         => $notes ?? 'Manual stock addition',
         ]);
     }
 
-
-    // ========================================================
-    // BONUS: Find ingredients that are running low
-    // ========================================================
-    // Returns a list of ingredients where current stock
-    // is at or below the minimum stock level.
-    // Used to show warnings on the dashboard.
-    // ========================================================
-
+// to find where any ingredients are running low or not
     public function getLowStockIngredients()
     {
-        // whereColumn() compares two columns in the same table
-        // This finds rows where current_stock <= minimum_stock
+        //comparing current stock with minimum stock
         return Ingredient::whereColumn('current_stock', '<=', 'minimum_stock')->get();
     }
 }
